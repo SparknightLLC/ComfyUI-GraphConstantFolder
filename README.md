@@ -23,6 +23,9 @@ It can also fold **non-lazy switch-like nodes** when their decision input resolv
 1. **Constant-folding:** if a switch decision is constant at prompt submission time, it rewires downstream links so consumers connect directly to the selected branch.
 2. **Pruning (optional):** if `PRUNE=1`, it removes nodes that become unreachable upstream of the execution targets (output nodes or partial-execution targets).
 
+> [!TIP]
+> This extension does *not* change your workflow file on disk; it simply modifies the prompt dict sent to validation/execution.
+
 ## Folding targets
 
 ### Lazy switches
