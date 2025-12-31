@@ -1,5 +1,8 @@
 # ComfyUI-GraphConstantFolder
 
+- **Without:** *1 second "got prompt" delay*
+- **With:** *0.1 second "got prompt" delay* 🫨
+
 A server-side ComfyUI extension that rewrites the submitted prompt graph **before validation** to **constant-fold** switch/selector nodes and optionally **prune** now-unreachable branches.
 
 This targets the common performance bottleneck in large workflows where ComfyUI’s prompt validation recursively traverses *linked upstream nodes* even when a conditional branch will not execute.
