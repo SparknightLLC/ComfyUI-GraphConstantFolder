@@ -12,7 +12,7 @@ This targets the common performance bottleneck in large workflows where ComfyUI�
 This extension is designed to be used in tandem with node packs that provide conditional routing:
 
 - **Akatz-Loop-Nodes** — provides `LazySwitch`, `LazyIndexSwitch`, `LazyConditional`
-	- [https://github.com/BadCafeCode/comfyui-execution-inversion](https://github.com/akatz-ai/Akatz-Loop-Nodes)
+	- https://github.com/akatz-ai/Akatz-Loop-Nodes
 - **ComfyUI-KJNodes** — provides `LazySwitchKJ`
 	- https://github.com/kijai/ComfyUI-KJNodes
 
@@ -102,4 +102,4 @@ This does not evaluate boolean logic (AND/OR/compare), so it remains conservativ
 Prompt executed in 0.06 seconds
 ```
 
-Without the extension, the same ~200 node workflow incurs a "get prompt" delay of about 0.5 seconds.
+Without the extension, the same ~200 node workflow incurs a "got prompt" delay of about 0.5 seconds.
