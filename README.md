@@ -1,5 +1,8 @@
 # ComfyUI-GraphConstantFolder
 
+- **Without:** *1 second "got prompt" delay*
+- **With:** *0.1 second "got prompt" delay* 🤯
+
 A server-side ComfyUI extension that rewrites the submitted prompt graph **before validation** to **constant-fold** switch/selector nodes and optionally **prune** now-unreachable branches.
 
 This targets the common performance bottleneck in large workflows where ComfyUI’s prompt validation recursively traverses *linked upstream nodes* even when a conditional branch will not execute.
@@ -11,6 +14,8 @@ This targets the common performance bottleneck in large workflows where ComfyUI�
 
 This extension is designed to be used in tandem with node packs that provide conditional routing:
 
+- **Akatz-Loop-Nodes** — provides `LazySwitch`, `LazyIndexSwitch`, `LazyConditional`
+	- https://github.com/akatz-ai/Akatz-Loop-Nodes
 - **ComfyUI-KJNodes** — provides `LazySwitchKJ`
 	- https://github.com/kijai/ComfyUI-KJNodes
 
@@ -20,6 +25,9 @@ It can also fold **non-lazy switch-like nodes** when their decision input resolv
 
 1. **Constant-folding:** if a switch decision is constant at prompt submission time, it rewires downstream links so consumers connect directly to the selected branch.
 2. **Pruning (optional):** if `PRUNE=1`, it removes nodes that become unreachable upstream of the execution targets (output nodes or partial-execution targets).
+
+> [!TIP]
+> This extension does *not* change your workflow file on disk; it simply modifies the prompt dict sent to validation/execution.
 
 ## Folding targets
 
@@ -94,6 +102,11 @@ This does not evaluate boolean logic (AND/OR/compare), so it remains conservativ
 ```
 [GraphConstantFolder] on_prompt: nodes=203, switch_candidates=23, foldable=11, prune=1, verbose=1
 [GraphConstantFolder] rewrote nodes=20, pruned=105, dt_ms=4.36
+Prompt executed in 0.06 seconds
 ```
 
+<<<<<<< HEAD
 Without the extension, the same ~200 node workflow incurs a "get prompt" delay of about 0.5 seconds.
+=======
+Without the extension, the same ~200 node workflow incurs a "got prompt" delay of about 0.5 seconds.
+>>>>>>> 583476aa31f13897eaea0398d04e7c6ce273ba17
