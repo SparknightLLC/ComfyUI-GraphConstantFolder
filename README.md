@@ -4,6 +4,9 @@ A server-side ComfyUI extension that rewrites the submitted prompt graph **befor
 
 This targets the common performance bottleneck in large workflows where ComfyUI’s prompt validation recursively traverses *linked upstream nodes* even when a conditional branch will not execute.
 
+> [!NOTE]
+> In some workflows this can also act as a practical workaround for ComfyUI validation failures involving nested subgraphs and lazy switch nodes, especially with **comfyui-execution-inversion**. By folding prompt-time-constant branches before validation, it can avoid backend recursion through inactive paths. This is a workflow-dependent workaround, not a guaranteed fix for all subgraph issues.
+
 ## Works best with
 
 This extension is designed to be used in tandem with node packs that provide conditional routing:
