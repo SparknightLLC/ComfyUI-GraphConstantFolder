@@ -104,9 +104,3 @@ This does not evaluate boolean logic (AND/OR/compare), so it remains conservativ
 [GraphConstantFolder] rewrote nodes=20, pruned=105, dt_ms=4.36
 Prompt executed in 0.06 seconds
 ```
-
-<<<<<<< HEAD
-Without the extension, the same ~200 node workflow incurs a "get prompt" delay of about 0.5 seconds.
-=======
-Without the extension, the same ~200 node workflow incurs a "got prompt" delay of about 0.5 seconds.
->>>>>>> 583476aa31f13897eaea0398d04e7c6ce273ba17
