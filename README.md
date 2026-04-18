@@ -11,8 +11,6 @@ This targets the common performance bottleneck in large workflows where ComfyUI�
 
 This extension is designed to be used in tandem with node packs that provide conditional routing:
 
-- **comfyui-execution-inversion** — provides `LazySwitch`, `LazyIndexSwitch`, `LazyConditional`
-	- https://github.com/BadCafeCode/comfyui-execution-inversion
 - **ComfyUI-KJNodes** — provides `LazySwitchKJ`
 	- https://github.com/kijai/ComfyUI-KJNodes
 
@@ -96,7 +94,6 @@ This does not evaluate boolean logic (AND/OR/compare), so it remains conservativ
 ```
 [GraphConstantFolder] on_prompt: nodes=203, switch_candidates=23, foldable=11, prune=1, verbose=1
 [GraphConstantFolder] rewrote nodes=20, pruned=105, dt_ms=4.36
-Prompt executed in 0.08 seconds
 ```
 
 Without the extension, the same ~200 node workflow incurs a "get prompt" delay of about 0.5 seconds.
