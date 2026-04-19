@@ -11,7 +11,7 @@ def _log_info(msg: str) -> None:
 	logging.info(f"{_LOG_PREFIX} {msg}")
 
 def _log_debug(msg: str) -> None:
-	if _DEBUG:
+	if _DEBUG or _VERBOSE:
 		logging.info(f"{_LOG_PREFIX} {msg}")
 
 def _log_verbose(msg: str) -> None:
@@ -118,6 +118,116 @@ def _coerce_int(v: Any) -> Optional[int]:
 				return None
 	return None
 
+def _coerce_str(v: Any) -> Optional[str]:
+	if isinstance(v, str):
+		return v
+	return None
+
+def _canonical_class_type(class_type: str) -> str:
+	return class_type.split(" | ", 1)[0]
+
+def _strip_enum_comment(line: str) -> str:
+	quote_char = None
+	escaped = False
+	i = 0
+	while i < len(line):
+		ch = line[i]
+		next_ch = line[i + 1] if i + 1 < len(line) else ""
+		if quote_char is not None:
+			if escaped:
+				escaped = False
+			elif ch == "\\":
+				escaped = True
+			elif ch == quote_char:
+				quote_char = None
+			i += 1
+			continue
+
+		if ch in ("\"", "'"):
+			quote_char = ch
+			i += 1
+			continue
+		if ch == "#":
+			return line[:i]
+		if ch == "/" and next_ch == "/":
+			return line[:i]
+		i += 1
+	return line
+
+def _read_enum_name(line: str) -> Tuple[Optional[str], str]:
+	line = line.strip()
+	if not line:
+		return (None, "")
+	if line[0] not in ("\"", "'"):
+		if "=" in line:
+			name, rest = line.split("=", 1)
+			return (name.strip(), f"={rest.strip()}")
+		return (line.strip(), "")
+
+	quote_char = line[0]
+	escaped = False
+	chars = []
+	for i in range(1, len(line)):
+		ch = line[i]
+		if escaped:
+			if ch == "n":
+				chars.append("\n")
+			elif ch == "t":
+				chars.append("\t")
+			else:
+				chars.append(ch)
+			escaped = False
+		elif ch == "\\":
+			escaped = True
+		elif ch == quote_char:
+			return ("".join(chars), line[i + 1:].strip())
+		else:
+			chars.append(ch)
+	return (None, "")
+
+def _parse_enum_choice_value(enum_definition: str, choice: str, start: int = 0) -> Optional[int]:
+	next_value = start
+	for raw_line in enum_definition.splitlines():
+		line = _strip_enum_comment(raw_line).strip().rstrip(",;").strip()
+		if not line:
+			continue
+
+		name, rest = _read_enum_name(line)
+		if name is None:
+			return None
+
+		if rest:
+			if not rest.startswith("="):
+				return None
+			raw_value = rest[1:].strip().rstrip(",;").strip()
+			try:
+				next_value = int(raw_value, 0)
+			except Exception:
+				return None
+
+		value = next_value
+		if name == choice:
+			return value
+		next_value += 1
+
+	return None
+
+def _compare_int_values(op: str, a: int, b: int) -> Optional[bool]:
+	normalized_op = op.strip().lower()
+	if normalized_op in ("eq", "==", "="):
+		return a == b
+	if normalized_op in ("ne", "neq", "!=", "<>"):
+		return a != b
+	if normalized_op in ("gt", ">"):
+		return a > b
+	if normalized_op in ("gte", "ge", ">="):
+		return a >= b
+	if normalized_op in ("lt", "<"):
+		return a < b
+	if normalized_op in ("lte", "le", "<="):
+		return a <= b
+	return None
+
 def _get_inputs(node: Dict[str, Any]) -> Dict[str, Any]:
 	inp = node.get("inputs", None)
 	return inp if isinstance(inp, dict) else {}
@@ -132,6 +242,10 @@ def _resolve_constant(prompt: Dict[str, Any], value: Any, want: str, cache: Dict
 		i = _coerce_int(value)
 		if i is not None:
 			return i
+	elif want == "str":
+		s = _coerce_str(value)
+		if s is not None:
+			return s
 	else:
 		return None
 
@@ -150,6 +264,7 @@ def _resolve_constant(prompt: Dict[str, Any], value: Any, want: str, cache: Dict
 		return None
 
 	class_type = str(node.get("class_type", ""))
+	canonical_class_type = _canonical_class_type(class_type)
 	inputs = _get_inputs(node)
 
 	# Reroute-like pass-through
@@ -169,7 +284,7 @@ def _resolve_constant(prompt: Dict[str, Any], value: Any, want: str, cache: Dict
 		candidates = []
 		for k in (
 			"value", "bool", "boolean", "boolean_value", "state", "enabled", "enable",
-			"switch", "toggle", "flag", "index", "int", "number"
+			"switch", "toggle", "flag", "index", "int", "number", "string", "text"
 		):
 			if k in inputs:
 				candidates.append(inputs.get(k))
@@ -188,6 +303,36 @@ def _resolve_constant(prompt: Dict[str, Any], value: Any, want: str, cache: Dict
 				if res is not None:
 					cache[key] = res
 					return res
+			elif want == "str":
+				res = _coerce_str(c)
+				if res is not None:
+					cache[key] = res
+					return res
+
+	if want == "int" and canonical_class_type in ("EnumCombo", "EnumComboAdvanced") and out_idx == 0:
+		choice = _resolve_constant(prompt, inputs.get("choice", None), "str", cache, depth - 1)
+		enum_definition = _resolve_constant(prompt, inputs.get("enum_definition", None), "str", cache, depth - 1)
+		start = 0
+		if canonical_class_type == "EnumComboAdvanced":
+			raw_start = _resolve_constant(prompt, inputs.get("start", 0), "int", cache, depth - 1)
+			if isinstance(raw_start, int):
+				start = raw_start
+
+		if isinstance(choice, str) and isinstance(enum_definition, str):
+			res = _parse_enum_choice_value(enum_definition, choice, start)
+			if res is not None:
+				cache[key] = res
+				return res
+
+	if want == "bool" and canonical_class_type == "CM_IntBinaryCondition" and out_idx == 0:
+		op = _resolve_constant(prompt, inputs.get("op", None), "str", cache, depth - 1)
+		a = _resolve_constant(prompt, inputs.get("a", None), "int", cache, depth - 1)
+		b = _resolve_constant(prompt, inputs.get("b", None), "int", cache, depth - 1)
+		if isinstance(op, str) and isinstance(a, int) and isinstance(b, int):
+			res = _compare_int_values(op, a, b)
+			if res is not None:
+				cache[key] = res
+				return res
 
 	cache[key] = None
 	return None
@@ -263,27 +408,31 @@ def _is_index_switch_like(inputs: Dict[str, Any]) -> bool:
 		return ("value0" in inputs and "value1" in inputs)
 	return False
 
-def _constant_fold_switches(prompt: Dict[str, Any]) -> Tuple[Dict[str, Any], int, int, List[str]]:
+def _constant_fold_switches(prompt: Dict[str, Any], skip_ids: Optional[Set[str]] = None) -> Tuple[Dict[str, Any], int, int, List[str]]:
 	# Returns (replacements, fold_count, candidates, not_foldable_messages)
 	replacements: Dict[str, Any] = {}
 	fold_count = 0
 	candidates = 0
 	cache: Dict[Tuple[str, int, str], Any] = {}
 	not_foldable: List[str] = []
+	skip_ids = skip_ids if skip_ids is not None else set()
 
 	for node_id, node in prompt.items():
+		if str(node_id) in skip_ids:
+			continue
 		if not isinstance(node, dict):
 			continue
 
 		class_type = str(node.get("class_type", ""))
+		canonical_class_type = _canonical_class_type(class_type)
 		inputs = _get_inputs(node)
 
 		kind = None
 
 		# Known lazy nodes
-		if class_type in ("LazySwitch", "LazyIndexSwitch", "LazyConditional"):
-			kind = class_type
-		elif class_type == "LazySwitchKJ":
+		if canonical_class_type in ("LazySwitch", "LazyIndexSwitch", "LazyConditional"):
+			kind = canonical_class_type
+		elif canonical_class_type == "LazySwitchKJ":
 			kind = "LazySwitch"
 
 		# Switch-like nodes (non-lazy)
@@ -465,19 +614,34 @@ def _handler(json_data: Dict[str, Any]) -> Dict[str, Any]:
 
 	t0 = time.perf_counter()
 
-	replacements, fold_count, candidates, not_foldable = _constant_fold_switches(prompt)
+	total_fold_count = 0
+	candidates = 0
+	not_foldable: List[str] = []
+	changed_nodes: Set[str] = set()
+	folded_ids: Set[str] = set()
+
+	for pass_idx in range(16):
+		replacements, fold_count, pass_candidates, pass_not_foldable = _constant_fold_switches(prompt, folded_ids)
+		if pass_idx == 0:
+			candidates = pass_candidates
+
+		if fold_count == 0:
+			not_foldable = pass_not_foldable
+			break
+
+		changed_nodes.update(_apply_replacements(prompt, replacements))
+		folded_ids.update(replacements.keys())
+		total_fold_count += fold_count
 
 	if _VERBOSE:
 		for msg in not_foldable:
 			_log_verbose(msg)
 
 	if _DEBUG or _VERBOSE:
-		_log_debug(f"on_prompt: nodes={len(prompt)}, switch_candidates={candidates}, foldable={fold_count}, prune={int(_PRUNE)}, verbose={int(_VERBOSE)}")
+		_log_debug(f"on_prompt: nodes={len(prompt)}, switch_candidates={candidates}, foldable={total_fold_count}, prune={int(_PRUNE)}, verbose={int(_VERBOSE)}")
 
-	if fold_count == 0:
+	if total_fold_count == 0:
 		return json_data
-
-	changed_nodes = _apply_replacements(prompt, replacements)
 
 	removed = 0
 	if _PRUNE:
@@ -493,6 +657,15 @@ def _handler(json_data: Dict[str, Any]) -> Dict[str, Any]:
 	return json_data
 
 _installed = False
+_HANDLER_MARKER = "_graph_constant_folder_handler"
+
+def _is_existing_handler(handler: Any) -> bool:
+	if getattr(handler, _HANDLER_MARKER, False):
+		return True
+	if getattr(handler, "__name__", "") != "_handler":
+		return False
+	module_name = str(getattr(handler, "__module__", ""))
+	return "graph_constant_folder" in module_name
 
 def install() -> None:
 	global _installed
@@ -519,5 +692,12 @@ def install() -> None:
 		_log_info("ComfyUI server missing add_on_prompt_handler; update ComfyUI")
 		return
 
+	if hasattr(inst, "on_prompt_handlers"):
+		inst.on_prompt_handlers = [
+			h for h in inst.on_prompt_handlers
+			if not _is_existing_handler(h)
+		]
+
+	setattr(_handler, _HANDLER_MARKER, True)
 	inst.add_on_prompt_handler(_handler)
 	_log_info("installed on_prompt handler (constant-fold: lazy switches + switch-like nodes)")

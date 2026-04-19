@@ -1,6 +1,6 @@
 {
 	"ENABLED": 1,
 	"DEBUG": 0,
-	"VERBOSE": 0,
+	"VERBOSE": 1,
 	"PRUNE": 1
 }
