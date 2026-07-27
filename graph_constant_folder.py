@@ -6,6 +6,7 @@ import re
 from typing import Any, Dict, Tuple, Optional, Set, List
 
 _LOG_PREFIX = "[GraphConstantFolder]"
+_NOT_FOLDABLE = object()
 
 def _log_info(msg: str) -> None:
 	logging.info(f"{_LOG_PREFIX} {msg}")
@@ -339,30 +340,45 @@ def _resolve_constant(prompt: Dict[str, Any], value: Any, want: str, cache: Dict
 
 # --- folding rules -----------------------------------------------------------
 
-def _try_fold_bool_switch(prompt: Dict[str, Any], node_inputs: Dict[str, Any], cache: Dict[Tuple[str, int, str], Any], decision_key: str, false_key: str, true_key: str) -> Optional[Any]:
+def _try_fold_bool_switch(prompt: Dict[str, Any], node_inputs: Dict[str, Any], cache: Dict[Tuple[str, int, str], Any], decision_key: str, false_key: str, true_key: str) -> Any:
 	switch_raw = node_inputs.get(decision_key, None)
 	switch = _resolve_constant(prompt, switch_raw, "bool", cache)
 	if not isinstance(switch, bool):
-		return None
+		return _NOT_FOLDABLE
 
 	if false_key not in node_inputs or true_key not in node_inputs:
-		return None
+		return _NOT_FOLDABLE
 
 	return (node_inputs.get(true_key) if switch else node_inputs.get(false_key))
 
-def _try_fold_index_switch(prompt: Dict[str, Any], node_inputs: Dict[str, Any], cache: Dict[Tuple[str, int, str], Any], decision_key: str, value_prefix: str) -> Optional[Any]:
+def _try_fold_index_switch(prompt: Dict[str, Any], node_inputs: Dict[str, Any], cache: Dict[Tuple[str, int, str], Any], decision_key: str, value_prefix: str) -> Any:
 	index_raw = node_inputs.get(decision_key, None)
 	index = _resolve_constant(prompt, index_raw, "int", cache)
 	if not isinstance(index, int):
-		return None
+		return _NOT_FOLDABLE
 
 	key = f"{value_prefix}{index}"
 	if key not in node_inputs:
-		return None
+		return _NOT_FOLDABLE
 
 	return node_inputs.get(key)
 
-def _try_fold_lazy_conditional(prompt: Dict[str, Any], node_inputs: Dict[str, Any], cache: Dict[Tuple[str, int, str], Any]) -> Optional[Any]:
+def _try_fold_fallback_switch(prompt: Dict[str, Any], node_inputs: Dict[str, Any], cache: Dict[Tuple[str, int, str], Any]) -> Any:
+	index_raw = node_inputs.get("index", None)
+	index = _resolve_constant(prompt, index_raw, "int", cache)
+	if not isinstance(index, int):
+		return _NOT_FOLDABLE
+
+	for key in (f"values.value{index}", f"value{index}"):
+		if key in node_inputs:
+			return node_inputs.get(key)
+
+	if "default" in node_inputs:
+		return node_inputs.get("default")
+
+	return _NOT_FOLDABLE
+
+def _try_fold_lazy_conditional(prompt: Dict[str, Any], node_inputs: Dict[str, Any], cache: Dict[Tuple[str, int, str], Any]) -> Any:
 	cond_idxs = []
 	for k in node_inputs.keys():
 		m = re.fullmatch(r"condition(\d+)", str(k))
@@ -370,25 +386,25 @@ def _try_fold_lazy_conditional(prompt: Dict[str, Any], node_inputs: Dict[str, An
 			cond_idxs.append(int(m.group(1)))
 
 	if not cond_idxs:
-		return None
+		return _NOT_FOLDABLE
 
 	for i in sorted(cond_idxs):
 		cond_key = f"condition{i}"
 		cond_val_raw = node_inputs.get(cond_key, None)
 		cond_val = _resolve_constant(prompt, cond_val_raw, "bool", cache)
 		if not isinstance(cond_val, bool):
-			return None
+			return _NOT_FOLDABLE
 
 		if cond_val:
 			val_key = f"value{i}"
 			if val_key not in node_inputs:
-				return None
+				return _NOT_FOLDABLE
 			return node_inputs.get(val_key)
 
 	if "else" in node_inputs:
 		return node_inputs.get("else")
 
-	return None
+	return _NOT_FOLDABLE
 
 def _has_keys(d: Dict[str, Any], keys: List[str]) -> bool:
 	for k in keys:
@@ -434,6 +450,8 @@ def _constant_fold_switches(prompt: Dict[str, Any], skip_ids: Optional[Set[str]]
 			kind = canonical_class_type
 		elif canonical_class_type == "LazySwitchKJ":
 			kind = "LazySwitch"
+		elif canonical_class_type in ("SparknightLazyFallbackSwitch", "SparknightLazyFallbackSwitchStatic"):
+			kind = "LazyFallbackSwitch"
 
 		# Switch-like nodes (non-lazy)
 		elif _is_bool_switch_like(inputs):
@@ -445,7 +463,7 @@ def _constant_fold_switches(prompt: Dict[str, Any], skip_ids: Optional[Set[str]]
 			continue
 
 		candidates += 1
-		replacement = None
+		replacement = _NOT_FOLDABLE
 
 		if kind in ("LazySwitch", "BoolSwitchLike"):
 			if _has_keys(inputs, ["switch", "on_true", "on_false"]):
@@ -453,20 +471,25 @@ def _constant_fold_switches(prompt: Dict[str, Any], skip_ids: Optional[Set[str]]
 			elif _has_keys(inputs, ["condition", "if_true", "if_false"]):
 				replacement = _try_fold_bool_switch(prompt, inputs, cache, "condition", "if_false", "if_true")
 
-			if replacement is None and _VERBOSE:
+			if replacement is _NOT_FOLDABLE and _VERBOSE:
 				not_foldable.append(f"not foldable: {class_type} #{node_id} (decision input not constant)")
 
 		elif kind in ("LazyIndexSwitch", "IndexSwitchLike"):
 			replacement = _try_fold_index_switch(prompt, inputs, cache, "index", "value")
-			if replacement is None and _VERBOSE:
+			if replacement is _NOT_FOLDABLE and _VERBOSE:
 				not_foldable.append(f"not foldable: {class_type} #{node_id} (decision input not constant or missing valueN)")
+
+		elif kind == "LazyFallbackSwitch":
+			replacement = _try_fold_fallback_switch(prompt, inputs, cache)
+			if replacement is _NOT_FOLDABLE and _VERBOSE:
+				not_foldable.append(f"not foldable: {class_type} #{node_id} (decision input not constant or fallback missing)")
 
 		elif kind == "LazyConditional":
 			replacement = _try_fold_lazy_conditional(prompt, inputs, cache)
-			if replacement is None and _VERBOSE:
+			if replacement is _NOT_FOLDABLE and _VERBOSE:
 				not_foldable.append(f"not foldable: {class_type} #{node_id} (conditions not constant)")
 
-		if replacement is None:
+		if replacement is _NOT_FOLDABLE:
 			continue
 
 		replacements[str(node_id)] = replacement
